@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Command, END, interrupt, MemorySaver, START, StateGraph } from "@langchain/langgraph";
 import { z } from "zod";
 import { mergeLocal } from "./local-merge.ts";
-import { assertGitConfigUnchanged, gitConfigHash, repoOf, selfApproval, safeGit, MAX_REVISIONS, MAX_ACTIVE_TICKETS, budgetExceeded, RECURSION_LIMIT, activeTickets, installDeps, tokens, verifyEvidence } from "./guardrails.ts";
+import { assertGitConfigUnchanged, gitConfigHash, repoOf, selfApproval, safeGit, MAX_REVISIONS, MAX_ACTIVE_TICKETS, MAX_FILE_LINES, MAX_LINE_COLS, budgetExceeded, RECURSION_LIMIT, activeTickets, installDeps, tokens, verifyEvidence } from "./guardrails.ts";
 import { orchHome, workRoot } from "./daily-cap.ts";
 import { type CommandSettings, commandTarget, getDeployTarget, recordDeploy } from "./deploy.ts";
 import { mergePr, publish } from "./publish.ts";
@@ -104,6 +104,7 @@ const ticketData = (t: T) =>
 export const devRules = (test = "npm test", turns?: number) =>
   `Implement in the current worktree, run ${test} and commit (git add/git commit). Do not push. ` +
   `Also fill \`brief\`: why (the problem or goal this solves), how (approach and key decisions), where it applies (modules, endpoints, screens or users affected, and what is deliberately not touched). ` +
+  `Modularity is mandatory: every source file you touch must stay within ${MAX_FILE_LINES} lines and ${MAX_LINE_COLS} columns per line; split by responsibility instead of growing a file. The orchestrator rejects the commit otherwise. ` +
   (turns ? `You have at most ${turns} turns and uncommitted work is lost value: get a first version passing ${test} and commit it early, then refine and commit again. ` : "") +
   `Shell: one simple command per call (git add, git commit, git status, git diff, git log, ${test}); no ';', '&&' or pipes, they are denied, so on a denial retry with a single command.`;
 export const DEV_RULES = devRules();

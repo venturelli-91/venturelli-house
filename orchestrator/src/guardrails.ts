@@ -72,6 +72,22 @@ export const repoOf = (worktree: string): string => dirname(resolve(worktree, sa
 // Files npm runs on the host: if the agent changed them, the ticket goes to the CEO instead of running.
 const RUNS_ON_HOST = /(^|\/)(package\.json|\.npmrc|conftest\.py|setup\.py|setup\.cfg|pyproject\.toml|pytest\.ini|tox\.ini|Makefile)$/i;
 
+// Modularity: every source file a ticket touches must stay within these limits (untouched legacy files are not checked).
+export const MAX_FILE_LINES = 300;
+export const MAX_LINE_COLS = 160;
+const SOURCE_FILE = /\.(?:[cm]?[jt]sx?|py|css|scss|go|rs|java|kt|swift|rb|php|vue|svelte|html|sh|sql|c|h|cpp|cs)$/i;
+const MAX_FILE_BYTES = MAX_FILE_LINES * (MAX_LINE_COLS + 2);
+
+// Reads the committed blob (never the worktree file, so symlinks are not followed); a blob too big to comply is refused unread.
+function modularityViolations(wt: string, files: string[]): string[] {
+  return files.filter((f) => SOURCE_FILE.test(f)).flatMap((f) => {
+    if (Number(safeGit(wt, "cat-file", "-s", `HEAD:${f}`)) > MAX_FILE_BYTES) return [`${f} (over ${MAX_FILE_BYTES} bytes)`];
+    const lines = safeGit(wt, "cat-file", "blob", `HEAD:${f}`).split(/\r?\n/);
+    const long = lines.filter((l) => l.length > MAX_LINE_COLS).length;
+    return lines.length > MAX_FILE_LINES || long ? [`${f} (${lines.length} lines, ${long} over ${MAX_LINE_COLS} cols)`] : [];
+  });
+}
+
 // Evidence verified by code (zero token cost): what the agent claims does not count.
 export function verifyEvidence(wt: string, base: string, test = DEFAULT_TEST, install = false):{ ok: true; author: string; sha: string; evidence: string[] } | { ok: false; reason: string } {
   const git = (...a: string[]) => safeGit(wt, ...a);
@@ -85,11 +101,14 @@ export function verifyEvidence(wt: string, base: string, test = DEFAULT_TEST, in
   const dirt = git("status", "--porcelain", "--untracked-files=all", "--ignored").split("\n").filter(Boolean);
   if (dirt.some((l) => !l.startsWith("!!"))) return { ok: false, reason: "worktree has uncommitted changes" };
   if (dirt.some((l) => RUNS_ON_HOST.test(l.slice(3)))) return { ok: false, reason: "file that runs code on the host is outside the commit (ignored)" };
-  const files = git("-c", "core.quotePath=false", "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", `${base}..HEAD`).split("\0").filter(Boolean);
+  const diffFiles = (...extra: string[]) => git("-c", "core.quotePath=false", "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", ...extra, `${base}..HEAD`).split("\0").filter(Boolean);
+  const files = diffFiles();
   const forbidden = files.filter((f) => FORBIDDEN.test(f));
   if (forbidden.length) return { ok: false, reason: `diff touches forbidden path (${forbidden.join(", ")})` };
   const risky = files.filter((f) => RUNS_ON_HOST.test(f) || (install && /(^|\/)(package-lock|npm-shrinkwrap)\.json$/i.test(f)));
   if (risky.length) return { ok: false, reason: `diff touches a file that runs code on the host (${risky.join(", ")}): requires CEO review` };
+  const oversized = modularityViolations(wt, diffFiles("--diff-filter=d"));
+  if (oversized.length) return { ok: false, reason: `touched files break the modularity limit (${MAX_FILE_LINES} lines, ${MAX_LINE_COLS} cols): ${oversized.join(", ")}; split them` };
   if (install) installDeps(wt);
   try {
     // execSync (shell) because npm is npm.cmd on Windows. `test` comes from .orchestrator.json at the base commit

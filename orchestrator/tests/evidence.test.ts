@@ -174,3 +174,38 @@ test("a file hidden with assume-unchanged or skip-worktree voids the verificatio
     assert.match((r as { reason: string }).reason, /hidden from git/, flag);
   }
 });
+
+test("touched source files over the modularity limits are refused; untouched or non-source files are not", () => {
+  const cases: [string, string, boolean][] = [
+    ["a.ts", "x\n".repeat(301), false],
+    ["b.ts", `${"x".repeat(161)}\n`, false],
+    ["c.ts", "x\n".repeat(300), true],
+    ["d.json", "x\n".repeat(500), true],
+  ];
+  for (const [f, body, ok] of cases) {
+    const { d, base } = repo();
+    writeFileSync(join(d, f), body);
+    git(d, "add", "-A");
+    git(d, "commit", "-qm", "x");
+    const r = verifyEvidence(d, base);
+    rmSync(d, { recursive: true, force: true });
+    assert.equal(r.ok, ok, f);
+    if (!ok) assert.match((r as { reason: string }).reason, /modularity/, f);
+  }
+});
+
+test("modularity check reads the committed blob: a dangling symlink and a deleted oversized file do not break it", () => {
+  const { d } = repo();
+  writeFileSync(join(d, "big.ts"), "x\n".repeat(301));
+  git(d, "add", "-A");
+  git(d, "commit", "-qm", "big");
+  const base = git(d, "rev-parse", "HEAD");
+  git(d, "rm", "-q", "big.ts");
+  const blob = execFileSync("git", ["hash-object", "-w", "--stdin"], { cwd: d, input: "/nonexistent", encoding: "utf8" }).trim();
+  git(d, "update-index", "--add", "--cacheinfo", `120000,${blob},link.ts`);
+  git(d, "commit", "-qm", "delete big, add dangling symlink");
+  git(d, "reset", "-q", "--hard");
+  const r = verifyEvidence(d, base);
+  rmSync(d, { recursive: true, force: true });
+  assert.equal(r.ok, true);
+});

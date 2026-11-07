@@ -623,7 +623,7 @@ test("a task that ends without a new commit is a failed revision, not progress",
 });
 
 test("a diff over the review limit escalates instead of being cut, and no reviewer runs", async () => {
-  override.dev = (req) => (commit(req.cwd, "agent-dev", "checkout.html", "<button>Submit order</button>\n" + "x".repeat(70_000)), { summary: "ok", brief: BRIEF });
+  override.dev = (req) => (commit(req.cwd, "agent-dev"), commit(req.cwd, "agent-dev", "big.txt", "x".repeat(70_000)), { summary: "ok", brief: BRIEF });
   const g = await start();
   assert.equal(paused(g.r)?.type, "escalation");
   assert.match(String(paused(g.r)?.reason), /diff too large to review in full/);
